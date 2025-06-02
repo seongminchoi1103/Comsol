@@ -20,8 +20,8 @@ noise_size = 100
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print("Now using {} device".format(device))
 
-dir_name = "/mnt/c/Users/user/CGAN-PyTorch/comsol/data_png_colormap"
-output_name = "/mnt/c/Users/user/CGAN-PyTorch/comsol/result_png_colormap_2"
+dir_name = "/home/rtxtitanx1/Seongmin/comsol/data_png_colormap"
+output_name = "/home/rtxtitanx1/Seongmin/comsol/result_png_colormap"
 os.makedirs(output_name, exist_ok=True)
 
 def normalize_cond_vec(cond_vec):
@@ -151,51 +151,55 @@ def check_condition(_generator):
     _generator.train()
 
 # --- 학습 루프 ---
+def train():
+    for epoch in range(num_epoch):
+        loop = tqdm(data_loader, desc=f"Epoch [{epoch+1}/{num_epoch}]")
+        for images, cond_vec in loop:
+            batch_size = images.size(0)
+            real_label = torch.ones(batch_size, 1).to(device)
+            fake_label = torch.zeros(batch_size, 1).to(device)
 
-for epoch in range(num_epoch):
-    loop = tqdm(data_loader, desc=f"Epoch [{epoch+1}/{num_epoch}]")
-    for images, cond_vec in loop:
-        batch_size = images.size(0)
-        real_label = torch.ones(batch_size, 1).to(device)
-        fake_label = torch.zeros(batch_size, 1).to(device)
+            images = images.to(device)
+            cond_vec = cond_vec.to(device)
 
-        images = images.to(device)
-        cond_vec = cond_vec.to(device)
+            # Discriminator 학습
+            d_optimizer.zero_grad()
+            d_real_pred = discriminator(images, cond_vec)
+            d_real_loss = criterion(d_real_pred, real_label)
 
-        # Discriminator 학습
-        d_optimizer.zero_grad()
-        d_real_pred = discriminator(images, cond_vec)
-        d_real_loss = criterion(d_real_pred, real_label)
+            noise = torch.randn(batch_size, noise_size).to(device)
+            fake_images = generator(noise, cond_vec)
 
-        noise = torch.randn(batch_size, noise_size).to(device)
-        fake_images = generator(noise, cond_vec)
+            d_fake_pred = discriminator(fake_images.detach(), cond_vec)
+            d_fake_loss = criterion(d_fake_pred, fake_label)
 
-        d_fake_pred = discriminator(fake_images.detach(), cond_vec)
-        d_fake_loss = criterion(d_fake_pred, fake_label)
+            d_loss = (d_real_loss + d_fake_loss) * 0.5
+            d_loss.backward()
+            d_optimizer.step()
 
-        d_loss = (d_real_loss + d_fake_loss) * 0.5
-        d_loss.backward()
-        d_optimizer.step()
+            # Generator 학습
+            g_optimizer.zero_grad()
+            g_fake_pred = discriminator(fake_images, cond_vec)
+            g_loss = criterion(g_fake_pred, real_label)
+            g_loss.backward()
+            g_optimizer.step()
 
-        # Generator 학습
-        g_optimizer.zero_grad()
-        g_fake_pred = discriminator(fake_images, cond_vec)
-        g_loss = criterion(g_fake_pred, real_label)
-        g_loss.backward()
-        g_optimizer.step()
+            loop.set_postfix(d_loss=d_loss.item(), g_loss=g_loss.item())
 
-        loop.set_postfix(d_loss=d_loss.item(), g_loss=g_loss.item())
+        # Epoch마다 결과 저장
+        with torch.no_grad():
+            test_noise = torch.randn(batch_size, noise_size).to(device)
+        test_cond = cond_vec
+        fake_samples = generator(test_noise, test_cond)
 
-    # Epoch마다 결과 저장
-    with torch.no_grad():
-        test_noise = torch.randn(batch_size, noise_size).to(device)
-    test_cond = cond_vec
-    fake_samples = generator(test_noise, test_cond)
+        # real_images와 fake_samples를 가로로 붙이기 (dim=3: width 방향)
+        comparison = torch.cat([images.cpu(), fake_samples.cpu()], dim=3)  # detach()해도 됨
 
-    # real_images와 fake_samples를 가로로 붙이기 (dim=3: width 방향)
-    comparison = torch.cat([images.cpu(), fake_samples.cpu()], dim=3)  # detach()해도 됨
+        # 저장 (normalize=True 유지)
+        save_image(comparison, os.path.join(output_name, f'CGAN_compare_epoch{epoch+1}.png'), normalize=True)
+        
+        if epoch == num_epoch - 1:
+            torch.save(generator.state_dict(), os.path.join(output_name, 'best_model.pt'))
 
-    # 저장 (normalize=True 유지)
-    save_image(comparison, os.path.join(output_name, f'CGAN_compare_epoch{epoch+1}.png'), normalize=True)
-
-check_condition(generator)
+if __name__ == "__main__":
+    train()
